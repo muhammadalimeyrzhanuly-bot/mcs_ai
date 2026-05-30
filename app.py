@@ -18,23 +18,19 @@ client = OpenAI(
 
 st.set_page_config(page_title="mcs AI PRO", page_icon="🤖", layout="wide")
 
-# Кастомный CSS для красивого стиля сообщений
+# Кастомный CSS для красивого стиля сообщений и выравнивания кнопок ввода
 st.markdown("""
     <style>
     .stChatMessage { border-radius: 15px; padding: 15px; margin-bottom: 10px; }
-    div[data-testid="stForm"] { border: none !important; padding: 0 !important; }
     
-    /* Уменьшение отступов вокруг кнопок в столбцах */
-    .chat-input-column {
-        padding-left: 0 !important;
-        padding-right: 0 !important;
-    }
-    
-    /* Стилизация кнопок для компактного вида */
+    /* Делаем кнопки "+" и "🚀" красивыми и выровненными по высоте с полем ввода */
     div[data-testid="column"] button {
-        height: auto;
-        padding-top: 6px;
-        padding-bottom: 6px;
+        width: 100% !important;
+        height: 42px !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        line-height: 42px !important;
+        font-size: 18px !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -145,133 +141,117 @@ if check_password():
             if "image" in message and message["image"] is not None:
                 st.image(message["image"], width=300)
 
-    # --- ЗОНА ЧАТА: ВЛОЖЕНИЯ И ОТПРАВКА ---
-    # Мы используем st.container() для создания "панели ввода" внизу
-    with st.container():
-        # Сначала обрабатываем вложения, если меню открыто
-        if st.session_state.show_attachments:
-            st.write("### 📎 Выберите вложение:")
-            source_type = st.radio(
-                "Тип источника:",
-                ["Ничего", "📸 Камера (Основная)", "📸 Камера (Селфи)", "🖼️ Галерея / Файлы"]
-            )
-            
-            uploaded_pic = None
-            facing_mode = None
-            
-            if source_type == "📸 Камера (Основная)":
-                uploaded_pic = st.camera_input("Сделайте снимок задания")
-                facing_mode = "environment"
-            elif source_type == "📸 Камера (Селфи)":
-                uploaded_pic = st.camera_input("Сделайте селфи")
-                facing_mode = "user"
-            elif source_type == "🖼️ Галерея / Файлы":
-                uploaded_pic = st.file_uploader("Выберите фото из галереи", type=["jpg", "jpeg", "png"])
+    # --- ЗОНА ВЛОЖЕНИЙ (ОТКРЫВАЕТСЯ ПО НАЖАТИЮ НА ПЛЮСИК) ---
+    if st.session_state.show_attachments:
+        st.info("📎 Меню вложений:")
+        source_type = st.radio(
+            "Что вы хотите прикрепить?",
+            ["Ничего", "📸 Камера (Основная)", "📸 Камера (Селфи)", "🖼️ Галерея / Файлы"],
+            key="attachment_source"
+        )
+        
+        uploaded_pic = None
+        facing_mode = None
+        
+        if source_type == "📸 Камера (Основная)":
+            uploaded_pic = st.camera_input("Сделайте снимок задания")
+            facing_mode = "environment"
+        elif source_type == "📸 Камера (Селфи)":
+            uploaded_pic = st.camera_input("Сделайте селфи")
+            facing_mode = "user"
+        elif source_type == "🖼️ Галерея / Файлы":
+            uploaded_pic = st.file_uploader("Выберите фото из галереи или файлы", type=["jpg", "jpeg", "png"])
 
-            if facing_mode and source_type != "Ничего":
-                st.components.v1.html(
-                    f"""<script>
-                    const video = parent.document.querySelector('video');
-                    if (video && video.srcObject) {{
-                        const constraints = {{ video: {{ facingMode: "{facing_mode}" }} }};
-                        navigator.mediaDevices.getUserMedia(constraints).then(stream => {{ video.srcObject = stream; }});
-                    }}
-                    </script>""", height=0
-                )
-
-            if uploaded_pic:
-                st.session_state.temp_image = uploaded_pic
-                st.image(uploaded_pic, caption="Фото готово к отправке!", width=150)
-                if st.button("❌ Сбросить фото"):
-                    st.session_state.temp_image = None
-                    st.rerun()
-            
-            # Кнопка для закрытия меню вложений
-            if st.button("Закрыть меню вложений"):
-                st.session_state.show_attachments = False
-                st.rerun()
-            st.write("---")
-
-        # Если фото готово, отображаем его компактно над строкой ввода
-        if st.session_state.temp_image and not st.session_state.show_attachments:
-             st.image(st.session_state.temp_image, caption="Готово к отправке", width=100)
-             if st.button("❌ Сбросить", key="clear_ready_pic"):
-                 st.session_state.temp_image = None
-                 st.rerun()
-             st.write("---")
-
-
-        # --- СТРОКА ВВОДА С '+' СЛЕВА И '>' СПРАВА ---
-        # Мы НЕ используем st.form(), так как st.camera_input и st.file_uploader не работают внутри форм.
-        # Вместо этого мы используем st.columns и st.button(key=...) для управления отправкой.
-
-        # Столбцы для кнопок
-        col_attach, col_input, col_submit = st.columns([0.08, 0.84, 0.08])
-
-        with col_attach:
-            # Кнопка '+' слева. Переключает отображение меню вложений.
-            if st.button("➕", key="btn_attach_add"):
-                st.session_state.show_attachments = not st.session_state.show_attachments
-                st.rerun()
-
-        with col_input:
-            # Поле ввода. `key="user_msg_input"` позволяет нам получить значение позже.
-            placeholder_text = "Напишите вопрос к фото или просто текст..." if st.session_state.temp_image else "Спроси mcs AI о чём угодно..."
-            user_input = st.text_input(
-                label="Отправить сообщение...",
-                label_visibility="collapsed",
-                placeholder=placeholder_text,
-                key="user_msg_input"
+        if facing_mode and source_type != "Ничего":
+            st.components.v1.html(
+                f"""<script>
+                const video = parent.document.querySelector('video');
+                if (video && video.srcObject) {{
+                    const constraints = {{ video: {{ facingMode: "{facing_mode}" }} }};
+                    navigator.mediaDevices.getUserMedia(constraints).then(stream => {{ video.srcObject = stream; }});
+                }}
+                </script>""", height=0
             )
 
-        with col_submit:
-            # Кнопка отправки '>' справа.
-            submit_button = st.button("🚀", key="btn_chat_submit")
+        if uploaded_pic:
+            st.session_state.temp_image = uploaded_pic
+            st.image(uploaded_pic, caption="Фото прикреплено!", width=150)
+            if st.button("❌ Сбросить фото"):
+                st.session_state.temp_image = None
+                st.rerun()
+        st.write("---")
 
-        # Обработка отправки (логика та же)
-        if submit_button and (user_input or st.session_state.temp_image):
-            full_prompt = user_input
-            if st.session_state.temp_image and not user_input:
-                full_prompt = "[Отправлено фото задания. Пожалуйста, разбери и реши его]"
-            elif st.session_state.temp_image and user_input:
-                full_prompt = f"[Фото задания] Вопрос пользователя: {user_input}"
+    # Отображаем прикреплённое фото над строкой ввода, если меню закрыли
+    if st.session_state.temp_image and not st.session_state.show_attachments:
+         st.image(st.session_state.temp_image, caption="Фото готово к отправке", width=100)
+         if st.button("❌ Удалить фото", key="clear_ready_pic"):
+             st.session_state.temp_image = None
+             st.rerun()
 
-            # 📜 Тайно записываем время, логин и текст запроса в логи админа
-            now = datetime.datetime.now().strftime("%H:%M:%S")
-            st.session_state.audit_logs.append({
-                "time": now,
-                "user": current_user,
-                "text": full_prompt
-            })
+    # --- СТРОКА ВВОДА С ПЛЮСИКОМ СЛЕВА И СТРЕЛКОЙ СПРАВА ---
+    col_attach, col_input, col_submit = st.columns([0.07, 0.86, 0.07])
 
-            # Добавляем сообщение пользователя на экран в историю
-            st.session_state.messages.append({
-                "role": "user", 
-                "content": full_prompt, 
-                "image": st.session_state.temp_image
-            })
-
-            with st.chat_message("assistant"):
-                with st.spinner("mcs думает..."):
-                    try:
-                        chat_completion = client.chat.completions.create(
-                            messages=[
-                                {"role": "system", "content": "Ты продвинутый школьный ИИ ассистент mcs. Помогаешь ученику 7 класса. Ты эксперт по физике, химии, геометрии, а также отлично анализируешь произведения казахской литературы и истории."},
-                                {"role": "user", "content": full_prompt}
-                            ],
-                            model="llama3-8b-8192",
-                        )
-                        response = chat_completion.choices[0].message.content
-                        st.markdown(response)
-                        st.session_state.messages.append({"role": "assistant", "content": response})
-                    except Exception as e:
-                        st.error(f"Ошибка Groq: {e}")
-
-            # Сбрасываем временные состояния
-            st.session_state.temp_image = None
-            st.session_state.show_attachments = False
-            # Чтобы очистить поле ввода, нам нужно его "пересоздать" или использовать более сложную логику сессии.
-            # Но в Streamlit без использования st.form с clear_on_submit, самое простое - это st.rerun() после очистки ключа.
-            # Это сбросит `st.session_state.user_msg_input`.
-            st.session_state.user_msg_input = ""
+    with col_attach:
+        # ПЛЮСИК СЛЕВА: включает и выключает панель выбора камеры/файлов
+        if st.button("➕", key="plus_btn"):
+            st.session_state.show_attachments = not st.session_state.show_attachments
             st.rerun()
+
+    with col_input:
+        placeholder_text = "Напишите вопрос к фото..." if st.session_state.temp_image else "Спроси mcs AI о чём угодно..."
+        user_input = st.text_input(
+            label="Ввод",
+            label_visibility="collapsed",
+            placeholder=placeholder_text,
+            key="user_msg_input"
+        )
+
+    with col_submit:
+        # КНОПКА ОТПРАВКИ СПРАВА
+        submit_button = st.button("🚀", key="send_btn")
+
+    # --- ЛОГИКА ОБРАБОТКИ ОТПРАВКИ ЗАПРОСА ---
+    if submit_button and (user_input or st.session_state.temp_image):
+        full_prompt = user_input
+        if st.session_state.temp_image and not user_input:
+            full_prompt = "[Отправлено фото задания. Пожалуйста, разбери и реши его]"
+        elif st.session_state.temp_image and user_input:
+            full_prompt = f"[Фото задания] Вопрос пользователя: {user_input}"
+
+        # 📜 Записываем лог для админа
+        now = datetime.datetime.now().strftime("%H:%M:%S")
+        st.session_state.audit_logs.append({
+            "time": now,
+            "user": current_user,
+            "text": full_prompt
+        })
+
+        # Добавляем в историю сообщений
+        st.session_state.messages.append({
+            "role": "user", 
+            "content": full_prompt, 
+            "image": st.session_state.temp_image
+        })
+
+        with st.chat_message("assistant"):
+            with st.spinner("mcs думает..."):
+                try:
+                    chat_completion = client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": "Ты продвинутый школьный ИИ ассистент mcs. Помогаешь ученику 7 класса. Ты эксперт по физике, химии, геометрии, а также отлично анализируешь произведения казахской литературы и истории."},
+                            {"role": "user", "content": full_prompt}
+                        ],
+                        # ИСПОЛЬЗУЕМ НОВУЮ, АКТУАЛЬНУЮ МОДЕЛЬ ВМЕСТО ОТКЛЮЧЕННОЙ
+                        model="llama-3.1-8b-instant",
+                    )
+                    response = chat_completion.choices[0].message.content
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                except Exception as e:
+                    st.error(f"Ошибка Groq: {e}")
+
+        # Полностью очищаем поля после отправки и обновляем страницу
+        st.session_state.temp_image = None
+        st.session_state.show_attachments = False
+        st.session_state.user_msg_input = ""
+        st.rerun()
