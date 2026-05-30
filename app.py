@@ -2,15 +2,15 @@ import streamlit as st
 from openai import OpenAI
 import datetime
 
-# --- БЕЗОПАСНАЯ ПОДКЛЮЧКА КЛЮЧА ИЗ СЕКРЕТОВ СТРИМЛИТА ---
+# --- БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ КЛЮЧА ИЗ НАСТРОЕК СТРИМЛИТА ---
 try:
-    # Код сам берет ключ из панели управления Secrets, которую мы настроили
+    # Программа автоматически берет новый ключ из панели Secrets на share.streamlit.io
     groq_key = st.secrets["GROQ_API_KEY"]
 except Exception:
     st.error("❌ Ошибка: Ключ GROQ_API_KEY не найден в настройках Streamlit Secrets!")
     st.stop()
 
-# Инициализация клиента Groq
+# Инициализация клиента Groq через библиотеку OpenAI
 client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=groq_key
@@ -18,21 +18,36 @@ client = OpenAI(
 
 st.set_page_config(page_title="mcs AI PRO", page_icon="🤖", layout="wide")
 
-# Кастомный CSS для стиля ChatGPT
+# Кастомный CSS для красивого стиля сообщений
 st.markdown("""
     <style>
     .stChatMessage { border-radius: 15px; padding: 15px; margin-bottom: 10px; }
     div[data-testid="stForm"] { border: none !important; padding: 0 !important; }
+    
+    /* Уменьшение отступов вокруг кнопок в столбцах */
+    .chat-input-column {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+    
+    /* Стилизация кнопок для компактного вида */
+    div[data-testid="column"] button {
+        height: auto;
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# --- ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ В ПАМЯТИ ---
+# --- ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ В ПАМЯТИ САЙТА ---
 if "users_db" not in st.session_state:
+    # Твой главный админский аккаунт для управления
     st.session_state.users_db = {
         "admin": "2026"
     }
 
 if "audit_logs" not in st.session_state:
+    # Сюда будут тайно записываться все запросы твоих друзей
     st.session_state.audit_logs = []
 
 if "messages" not in st.session_state:
@@ -44,7 +59,11 @@ if "temp_image" not in st.session_state:
 if "current_user" not in st.session_state:
     st.session_state.current_user = None
 
-# --- ФУНКЦИЯ АВТОРИЗАЦИИ ---
+# Флаг для отображения меню вложений
+if "show_attachments" not in st.session_state:
+    st.session_state.show_attachments = False
+
+# --- ФУНКЦИЯ ОКНА ВХОДА (АВТОРИЗАЦИЯ) ---
 def check_password():
     if st.session_state.current_user is not None:
         return True
@@ -61,10 +80,11 @@ def check_password():
             st.error("❌ Неверный логин или пароль!")
     return False
 
-# --- ЕСЛИ ВХОД ВЫПОЛНЕН УСПЕШНО ---
+# --- ЕСЛИ СИСТЕМА ПРОПУСТИЛА ПОЛЬЗОВАТЕЛЯ ---
 if check_password():
     current_user = st.session_state.current_user
 
+    # Боковая панель: инфо об аккаунте и кнопка выхода
     with st.sidebar:
         st.write(f"Вы вошли как: **{current_user}**")
         if st.button("🚪 Выйти из аккаунта"):
@@ -72,25 +92,25 @@ if check_password():
             st.rerun()
         st.write("---")
 
-    # 😎 РЕЖИМ АДМИНИСТРАТОРА
+    # ==========================================
+    # 😎 РЕЖИМ АДМИНИСТРАТОРА (ВИДИТ ТОЛЬКО ADMIN)
+    # ==========================================
     if current_user == "admin":
         st.title("🛡️ Главное управление mcs AI")
         
         tab1, tab2, tab3 = st.tabs(["👥 Управление пользователями", "📜 История запросов (Логи)", "🤖 Чат ассистента"])
         
         with tab1:
-            st.subheader("➕ Регистрация нового пользователя")
-            new_login = st.text_input("Придумайте логин для друга (например, user1)", key="new_login")
-            new_pass = st.text_input("Придумайте пароль", type="password", key="new_pass")
+            st.subheader("➕ Регистрация / Смена пароля")
+            new_login = st.text_input("Логин пользователя (например, user1)", key="new_login")
+            new_pass = st.text_input("Пароль для этого логина", type="password", key="new_pass")
             
-            if st.button("Зарегистрировать пользователя"):
+            if st.button("Сохранить / Изменить пользователя"):
                 if new_login and new_pass:
-                    if new_login in st.session_state.users_db:
-                        st.error(f"Пользователь '{new_login}' уже существует!")
-                    else:
-                        st.session_state.users_db[new_login] = new_pass
-                        st.success(f"🎉 Пользователь '{new_login}' успешно создан! Его пароль: {new_pass}")
-                        st.rerun()
+                    # Перезаписывает пароль, если логин совпадает, сохраняя историю
+                    st.session_state.users_db[new_login] = new_pass
+                    st.success(f"🎉 Готово! У пользователя @{new_login} теперь пароль: {new_pass}")
+                    st.rerun()
                 else:
                     st.error("Заполните оба поля!")
             
@@ -102,7 +122,7 @@ if check_password():
         with tab2:
             st.subheader("🕵️ Контроль безопасности (Кто что писал)")
             if not st.session_state.audit_logs:
-                st.info("Запросов пока не было.")
+                st.info("Запросов пока не было. Здесь будут появляться все вопросы твоих друзей!")
             else:
                 for log in reversed(st.session_state.audit_logs):
                     st.warning(f"**[{log['time']}] Пользователь @{log['user']} отправил запрос:**")
@@ -110,71 +130,105 @@ if check_password():
                     st.write("---")
                     
         with tab3:
-            st.write("Здесь ты можешь общаться с ИИ как админ.")
+            st.write("Вы зашли как главный админ. Чат с ИИ открыт ниже:")
 
+    # Название чата для обычных пользователей
     if current_user != "admin":
         st.title(f"🤖 mcs AI — Привет, {current_user}!")
     else:
         st.write("---")
 
-    # Отображение истории сообщений
+    # Вывод истории текущего чата на экран
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if "image" in message and message["image"] is not None:
                 st.image(message["image"], width=300)
 
-    # --- ЗОНА ПЛЮСИКА ---
-    with st.sidebar:
-        st.subheader("📎 Вложения (Плюсик)")
-        source_type = st.radio(
-            "Что прикрепить к сообщению?",
-            ["Ничего", "📸 Камера (Основная)", "📸 Камера (Селфи)", "🖼️ Галерея / Файлы"]
-        )
-        
-        uploaded_pic = None
-        facing_mode = None
-        
-        if source_type == "📸 Камера (Основная)":
-            uploaded_pic = st.camera_input("Сделайте снимок задания")
-            facing_mode = "environment"
-        elif source_type == "📸 Камера (Селфи)":
-            uploaded_pic = st.camera_input("Сделайте селфи")
-            facing_mode = "user"
-        elif source_type == "🖼️ Галерея / Файлы":
-            uploaded_pic = st.file_uploader("Выберите фото из галереи", type=["jpg", "jpeg", "png"])
-
-        if facing_mode and source_type != "Ничего":
-            st.components.v1.html(
-                f"""<script>
-                const video = parent.document.querySelector('video');
-                if (video && video.srcObject) {{
-                    const constraints = {{ video: {{ facingMode: "{facing_mode}" }} }};
-                    navigator.mediaDevices.getUserMedia(constraints).then(stream => {{ video.srcObject = stream; }});
-                }}
-                </script>""", height=0
+    # --- ЗОНА ЧАТА: ВЛОЖЕНИЯ И ОТПРАВКА ---
+    # Мы используем st.container() для создания "панели ввода" внизу
+    with st.container():
+        # Сначала обрабатываем вложения, если меню открыто
+        if st.session_state.show_attachments:
+            st.write("### 📎 Выберите вложение:")
+            source_type = st.radio(
+                "Тип источника:",
+                ["Ничего", "📸 Камера (Основная)", "📸 Камера (Селфи)", "🖼️ Галерея / Файлы"]
             )
+            
+            uploaded_pic = None
+            facing_mode = None
+            
+            if source_type == "📸 Камера (Основная)":
+                uploaded_pic = st.camera_input("Сделайте снимок задания")
+                facing_mode = "environment"
+            elif source_type == "📸 Камера (Селфи)":
+                uploaded_pic = st.camera_input("Сделайте селфи")
+                facing_mode = "user"
+            elif source_type == "🖼️ Галерея / Файлы":
+                uploaded_pic = st.file_uploader("Выберите фото из галереи", type=["jpg", "jpeg", "png"])
 
-        if uploaded_pic:
-            st.session_state.temp_image = uploaded_pic
-            st.image(uploaded_pic, caption="Фото готово!", width=150)
-            if st.button("❌ Сбросить фото"):
-                st.session_state.temp_image = None
+            if facing_mode and source_type != "Ничего":
+                st.components.v1.html(
+                    f"""<script>
+                    const video = parent.document.querySelector('video');
+                    if (video && video.srcObject) {{
+                        const constraints = {{ video: {{ facingMode: "{facing_mode}" }} }};
+                        navigator.mediaDevices.getUserMedia(constraints).then(stream => {{ video.srcObject = stream; }});
+                    }}
+                    </script>""", height=0
+                )
+
+            if uploaded_pic:
+                st.session_state.temp_image = uploaded_pic
+                st.image(uploaded_pic, caption="Фото готово к отправке!", width=150)
+                if st.button("❌ Сбросить фото"):
+                    st.session_state.temp_image = None
+                    st.rerun()
+            
+            # Кнопка для закрытия меню вложений
+            if st.button("Закрыть меню вложений"):
+                st.session_state.show_attachments = False
+                st.rerun()
+            st.write("---")
+
+        # Если фото готово, отображаем его компактно над строкой ввода
+        if st.session_state.temp_image and not st.session_state.show_attachments:
+             st.image(st.session_state.temp_image, caption="Готово к отправке", width=100)
+             if st.button("❌ Сбросить", key="clear_ready_pic"):
+                 st.session_state.temp_image = None
+                 st.rerun()
+             st.write("---")
+
+
+        # --- СТРОКА ВВОДА С '+' СЛЕВА И '>' СПРАВА ---
+        # Мы НЕ используем st.form(), так как st.camera_input и st.file_uploader не работают внутри форм.
+        # Вместо этого мы используем st.columns и st.button(key=...) для управления отправкой.
+
+        # Столбцы для кнопок
+        col_attach, col_input, col_submit = st.columns([0.08, 0.84, 0.08])
+
+        with col_attach:
+            # Кнопка '+' слева. Переключает отображение меню вложений.
+            if st.button("➕", key="btn_attach_add"):
+                st.session_state.show_attachments = not st.session_state.show_attachments
                 st.rerun()
 
-    # --- СТРОКА ВВОДА СТИЛЬ CHATGPT ---
-    with st.container():
-        with st.form(key="chat_form", clear_on_submit=True):
-            cols = st.columns([0.88, 0.12])
-            with cols[0]:
-                user_input = st.text_input(
-                    label="Отправить сообщение...",
-                    label_visibility="collapsed",
-                    placeholder="Напишите вопрос к фото или просто текст..." if st.session_state.temp_image else "Спроси mcs AI о чём угодно..."
-                )
-            with cols[1]:
-                submit_button = st.form_submit_button(label="🚀")
+        with col_input:
+            # Поле ввода. `key="user_msg_input"` позволяет нам получить значение позже.
+            placeholder_text = "Напишите вопрос к фото или просто текст..." if st.session_state.temp_image else "Спроси mcs AI о чём угодно..."
+            user_input = st.text_input(
+                label="Отправить сообщение...",
+                label_visibility="collapsed",
+                placeholder=placeholder_text,
+                key="user_msg_input"
+            )
 
+        with col_submit:
+            # Кнопка отправки '>' справа.
+            submit_button = st.button("🚀", key="btn_chat_submit")
+
+        # Обработка отправки (логика та же)
         if submit_button and (user_input or st.session_state.temp_image):
             full_prompt = user_input
             if st.session_state.temp_image and not user_input:
@@ -182,6 +236,7 @@ if check_password():
             elif st.session_state.temp_image and user_input:
                 full_prompt = f"[Фото задания] Вопрос пользователя: {user_input}"
 
+            # 📜 Тайно записываем время, логин и текст запроса в логи админа
             now = datetime.datetime.now().strftime("%H:%M:%S")
             st.session_state.audit_logs.append({
                 "time": now,
@@ -189,6 +244,7 @@ if check_password():
                 "text": full_prompt
             })
 
+            # Добавляем сообщение пользователя на экран в историю
             st.session_state.messages.append({
                 "role": "user", 
                 "content": full_prompt, 
@@ -200,7 +256,7 @@ if check_password():
                     try:
                         chat_completion = client.chat.completions.create(
                             messages=[
-                                {"role": "system", "content": "Ты продвинутый школьный ИИ ассистент mcs. Помогаешь ученику 7 класса."},
+                                {"role": "system", "content": "Ты продвинутый школьный ИИ ассистент mcs. Помогаешь ученику 7 класса. Ты эксперт по физике, химии, геометрии, а также отлично анализируешь произведения казахской литературы и истории."},
                                 {"role": "user", "content": full_prompt}
                             ],
                             model="llama3-8b-8192",
@@ -211,5 +267,11 @@ if check_password():
                     except Exception as e:
                         st.error(f"Ошибка Groq: {e}")
 
+            # Сбрасываем временные состояния
             st.session_state.temp_image = None
+            st.session_state.show_attachments = False
+            # Чтобы очистить поле ввода, нам нужно его "пересоздать" или использовать более сложную логику сессии.
+            # Но в Streamlit без использования st.form с clear_on_submit, самое простое - это st.rerun() после очистки ключа.
+            # Это сбросит `st.session_state.user_msg_input`.
+            st.session_state.user_msg_input = ""
             st.rerun()
