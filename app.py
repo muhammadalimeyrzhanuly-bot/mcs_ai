@@ -1,12 +1,14 @@
 import streamlit as st
 from openai import OpenAI
 import datetime
+import streamlit.components.v1 as components  # Компонент для работы с HTML/JS (нужен для звонков)
 
-# --- БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ КЛЮЧА ИЗ НАСТРОЕК СТРИМЛИТА ---
+# --- БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ КЛЮЧЕЙ ИЗ НАСТРОЕК СТРИМЛИТА ---
 try:
     groq_key = st.secrets["GROQ_API_KEY"]
+    agora_id = st.secrets["AGORA_APP_ID"]  # Безопасно забираем ID Agora, скрытый от чужих глаз
 except Exception:
-    st.error("❌ Ошибка: Ключ GROQ_API_KEY не найден в настройках Streamlit Secrets!")
+    st.error("❌ Ошибка: Ключи GROQ_API_KEY или AGORA_APP_ID не найдены в настройках Streamlit Secrets!")
     st.stop()
 
 # Инициализация клиента Groq
@@ -80,6 +82,72 @@ if check_password():
             st.session_state.current_user = None
             st.rerun()
         st.write("---")
+        
+        # ==========================================
+        # 📞 ИНТЕГРАЦИЯ ЗВОНКОВ AGORA RTC (БЕЗОПАСНАЯ)
+        # ==========================================
+        st.subheader("📞 Голосовой звонок")
+        
+        AGORA_APP_ID = agora_id 
+        AGORA_CHANNEL = "mcs_voice_room"
+
+        agora_html = f"""
+        <script src="https://download.agora.io/sdk/release/AgoraRTC_N-4.18.0.js"></script>
+        <div style="text-align: center; font-family: sans-serif;">
+            <button id="join" style="background-color: #28a745; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 16px; cursor: pointer; width: 100%; margin-bottom: 8px;">🎤 Начать звонок</button>
+            <button id="leave" style="background-color: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 16px; cursor: pointer; width: 100%; display: none;">📴 Отключиться</button>
+            <p id="status" style="color: gray; font-size: 12px; margin-top: 5px;">Звонок не активен</p>
+        </div>
+
+        <script>
+        let client = AgoraRTC.createClient({{ mode: "rtc", codec: "vp8" }});
+        let localTracks = {{ audioTrack: null }};
+
+        document.getElementById('join').onclick = async function() {{
+            try {{
+                // Подключаемся к комнате без токена
+                await client.join("{AGORA_APP_ID}", "{AGORA_CHANNEL}", null, null);
+                
+                // Создаем аудиодорожку с микрофона
+                localTracks.audioTrack = await AgoraRTC.createMicrophoneAudioTrack();
+                
+                // Публикуем её в аудиоканал
+                await client.publish([localTracks.audioTrack]);
+                
+                document.getElementById('join').style.display = 'none';
+                document.getElementById('leave').style.display = 'block';
+                document.getElementById('status').innerText = "🟢 В эфире (Комната: {AGORA_CHANNEL})";
+                document.getElementById('status').style.color = "green";
+            }} catch (error) {{
+                console.error(error);
+                document.getElementById('status').innerText = "❌ Ошибка подключения: " + error.message;
+                document.getElementById('status').style.color = "red";
+            }}
+        }};
+
+        client.on("user-published", async (user, mediaType) => {{
+            await client.subscribe(user, mediaType);
+            if (mediaType === "audio") {{
+                user.audioTrack.play();
+            }}
+        }});
+
+        document.getElementById('leave').onclick = async function() {{
+            if(localTracks.audioTrack) {{
+                localTracks.audioTrack.stop();
+                localTracks.audioTrack.close();
+            }}
+            await client.leave();
+            document.getElementById('join').style.display = 'block';
+            document.getElementById('leave').style.display = 'none';
+            document.getElementById('status').innerText = "Звонок не активен";
+            document.getElementById('status').style.color = "gray";
+        }};
+        </script>
+        """
+        # Отображаем кнопку звонка в боковом меню
+        components.html(agora_html, height=150)
+        st.write("---")
 
     # ==========================================
     # 😎 РЕЖИМ АДМИНИСТРАТОРА (ДОСТУПЕН ТОЛЬКО ADMIN)
@@ -90,7 +158,6 @@ if check_password():
         tab1, tab2, tab3 = st.tabs(["👥 Управление пользователями", "📜 История запросов (Логи)", "🤖 Чат ассистента"])
         
         with tab1:
-            # Создание или изменение пароля
             st.subheader("➕ Регистрация / Смена пароля")
             new_login = st.text_input("Логин пользователя (например, user1)", key="new_login")
             new_pass = st.text_input("Пароль для этого логина", type="password", key="new_pass")
@@ -105,7 +172,6 @@ if check_password():
             
             st.write("---")
             
-            # 🔥 НАСТОЯЩЕЕ УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ 🔥
             st.subheader("🗑️ Удаление пользователя")
             delete_login = st.text_input("Введите логин, который нужно удалить", key="delete_login")
             
@@ -114,7 +180,6 @@ if check_password():
                     if delete_login == "admin":
                         st.error("Вы не можете удалить главного админа!")
                     elif delete_login in st.session_state.users_db:
-                        # Удаляем строчку из базы данных с помощью встроенной команды pop
                         st.session_state.users_db.pop(delete_login)
                         st.success(f"🗑️ Пользователь @{delete_login} полностью удален из системы!")
                         st.rerun()
