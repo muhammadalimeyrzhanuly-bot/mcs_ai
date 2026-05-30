@@ -2,10 +2,18 @@ import streamlit as st
 from openai import OpenAI
 import datetime
 
+# --- БЕЗОПАСНАЯ ПОДКЛЮЧКА КЛЮЧА ИЗ СЕКРЕТОВ СТРИМЛИТА ---
+try:
+    # Код сам берет ключ из панели управления Secrets, которую мы настроили
+    groq_key = st.secrets["GROQ_API_KEY"]
+except Exception:
+    st.error("❌ Ошибка: Ключ GROQ_API_KEY не найден в настройках Streamlit Secrets!")
+    st.stop()
+
 # Инициализация клиента Groq
 client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
-    api_key="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"  # <-- Твой реальный ключ Groq
+    api_key=groq_key
 )
 
 st.set_page_config(page_title="mcs AI PRO", page_icon="🤖", layout="wide")
@@ -20,13 +28,11 @@ st.markdown("""
 
 # --- ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ В ПАМЯТИ ---
 if "users_db" not in st.session_state:
-    # Изначально есть только главный админ
     st.session_state.users_db = {
         "admin": "2026"
     }
 
 if "audit_logs" not in st.session_state:
-    # База логов: кто, в какое время и какой запрос отправил
     st.session_state.audit_logs = []
 
 if "messages" not in st.session_state:
@@ -48,7 +54,6 @@ def check_password():
     password = st.text_input("Пароль", type="password")
     
     if st.button("Войти"):
-        # Проверяем, есть ли такой юзер в нашей созданной базе и совпадает ли пароль
         if username in st.session_state.users_db and st.session_state.users_db[username] == password:
             st.session_state.current_user = username
             st.rerun()
@@ -60,7 +65,6 @@ def check_password():
 if check_password():
     current_user = st.session_state.current_user
 
-    # Кнопка выхода из аккаунта вверху бокового меню
     with st.sidebar:
         st.write(f"Вы вошли как: **{current_user}**")
         if st.button("🚪 Выйти из аккаунта"):
@@ -68,9 +72,7 @@ if check_password():
             st.rerun()
         st.write("---")
 
-    # ==========================================
-    # 😎 РЕЖИМ АДМИНИСТРАТОРА (ДОСТУПЕН ТОЛЬКО ADMIN)
-    # ==========================================
+    # 😎 РЕЖИМ АДМИНИСТРАТОРА
     if current_user == "admin":
         st.title("🛡️ Главное управление mcs AI")
         
@@ -95,12 +97,12 @@ if check_password():
             st.write("---")
             st.subheader("📋 Список всех аккаунтов в системе")
             for u, p in st.session_state.users_db.items():
-                st.text(f"👤 Логин: {u}  |  🔑 Пароль: {u if u == 'admin' else p}") # Пароль админа скрыт для безопасности
+                st.text(f"👤 Логин: {u}  |  🔑 Пароль: {u if u == 'admin' else p}")
                 
         with tab2:
             st.subheader("🕵️ Контроль безопасности (Кто что писал)")
             if not st.session_state.audit_logs:
-                st.info("Запросов пока не было. Здесь будет отображаться всё, что пишут твои друзья!")
+                st.info("Запросов пока не было.")
             else:
                 for log in reversed(st.session_state.audit_logs):
                     st.warning(f"**[{log['time']}] Пользователь @{log['user']} отправил запрос:**")
@@ -109,11 +111,7 @@ if check_password():
                     
         with tab3:
             st.write("Здесь ты можешь общаться с ИИ как админ.")
-            # Чат для админа будет отображаться ниже, вкладка просто разделяет экраны
 
-    # ==========================================
-    # 🤖 ОБЫЧНЫЙ ИНТЕРФЕЙС ЧАТА (ДЛЯ ВСЕХ)
-    # ==========================================
     if current_user != "admin":
         st.title(f"🤖 mcs AI — Привет, {current_user}!")
     else:
@@ -126,7 +124,7 @@ if check_password():
             if "image" in message and message["image"] is not None:
                 st.image(message["image"], width=300)
 
-    # --- ЗОНА ПЛЮСИКА (Слева в боковой панели) ---
+    # --- ЗОНА ПЛЮСИКА ---
     with st.sidebar:
         st.subheader("📎 Вложения (Плюсик)")
         source_type = st.radio(
@@ -184,7 +182,6 @@ if check_password():
             elif st.session_state.temp_image and user_input:
                 full_prompt = f"[Фото задания] Вопрос пользователя: {user_input}"
 
-            # 📜 ЗАПИСЬ В ЛОГИ ДЛЯ АДМИНА
             now = datetime.datetime.now().strftime("%H:%M:%S")
             st.session_state.audit_logs.append({
                 "time": now,
@@ -192,7 +189,6 @@ if check_password():
                 "text": full_prompt
             })
 
-            # Добавляем в историю на экране
             st.session_state.messages.append({
                 "role": "user", 
                 "content": full_prompt, 
